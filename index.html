@@ -11,6 +11,7 @@
    <div class="game-container">
        <div class="controls-panel">
            <div class="game-controls">
+               <button id="saveSelectionBtn">Guardar Selección de Modelos</button>
                <button id="startBtn">Start New Game</button>
                <button id="stepBtn" disabled>Make Move</button>
                <button id="copyPgn">Copy PGN</button>
@@ -32,8 +33,10 @@
                        <select id="provider1"></select>
                    </div>
                    <div class="input-group model-group" id="modelGroup1" style="display: none;">
-                       <label>Model:</label>
-                       <select id="model1"></select>
+                       <label id="modelLabel1" style="display:none;">Model:</label>
+                       <select id="model1" style="display:none;"></select>
+                       <span id="model1Selected" style="margin-left:10px;color:green;"></span>
+                       <span id="model1Error" style="color:red;display:none;"></span>
                    </div>
                    <div class="input-group api-key-group" id="apiKeyGroup1" style="display: none;">
                        <label>API Key:</label>
@@ -65,8 +68,10 @@
                        <select id="provider2"></select>
                    </div>
                    <div class="input-group model-group" id="modelGroup2" style="display: none;">
-                       <label>Model:</label>
-                       <select id="model2"></select>
+                       <label id="modelLabel2" style="display:none;">Model:</label>
+                       <select id="model2" style="display:none;"></select>
+                       <span id="model2Selected" style="margin-left:10px;color:green;"></span>
+                       <span id="model2Error" style="color:red;display:none;"></span>
                    </div>
                    <div class="input-group api-key-group" id="apiKeyGroup2" style="display: none;">
                        <label>API Key:</label>
@@ -122,10 +127,11 @@
        </div>
    </div>
 
-   <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
-   <script src="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.js"></script>
-   <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
-   <script src="models-config.js"></script>
-   <script src="chess-game.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <script src="models-config.js"></script>
+    <script src="chess-game.js"></script>
 </body>
 </html>

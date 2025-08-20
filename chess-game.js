@@ -1,3 +1,11 @@
+// Axios para peticiones HTTP a Ollama
+let axios;
+if (typeof window !== 'undefined') {
+    axios = window.axios;
+} else {
+    axios = require('axios');
+}
+
 const SYSTEM_PROMPT = `You are playing a game of chess. You must analyze the position and choose a valid move from the legal moves available.
 
 CRITICAL REQUIREMENTS:
@@ -285,7 +293,7 @@ class OpenRouterProvider extends ChessModelProvider {
                 headers: {
                     'Authorization': `Bearer ${this.apiKey}`,
                     'Content-Type': 'application/json',
-                    'HTTP-Referer': window.location.origin // OpenRouter requires this
+                    'HTTP-Referer': window.location.origin // OpenRouter requiere esto
                 },
                 body: JSON.stringify({
                     messages: [
@@ -323,7 +331,48 @@ Respond in the required JSON format with your move and reasoning.
     }
 }
 
+class OllamaProvider extends ChessModelProvider {
+    constructor(model, temperature) {
+        super();
+        this.model = model;
+        this.temperature = temperature;
+    }
+
+    async makeMove({ fen, history, legalMoves }) {
+        return this.retryWithBackoff(async () => {
+            const prompt = SYSTEM_PROMPT + '\n' +
+                `Current position (FEN): ${fen}\nGame history: ${history || 'Opening position'}\nLegal moves: ${legalMoves.join(', ')}\nChoose a legal move from the provided list. Your move MUST match exactly one of the legal moves shown above. Respond with a JSON containing your chosen move and reasoning.`;
+            const response = await axios.post('http://localhost:11434/api/generate', {
+                model: this.model,
+                prompt,
+                options: {
+                    temperature: parseFloat(this.temperature)
+                },
+                stream: false
+            });
+            if (response.status !== 200) throw new Error('Ollama API error');
+            let content = response.data.response.trim();
+            content = content.replace(/```json|```/g, '').trim();
+            const moveData = JSON.parse(content);
+            return this.validateResponse(moveData, legalMoves);
+        });
+    }
+}
+
 class ChessProviderFactory {
+    // Ollama: obtener modelos dinámicamente
+    static async fetchOllamaModels() {
+        try {
+            const response = await axios.get('http://localhost:3000/api/tags');
+            if (response.status !== 200) throw new Error('Ollama server not available');
+            const models = response.data.models || [];
+            // Formato: { id: modelName, name: modelName }
+            return models.map(m => ({ id: m.name, name: m.name }));
+        } catch (err) {
+            console.error('Error fetching Ollama models:', err);
+            return [];
+        }
+    }
     // Use the external configuration file
     static get PROVIDERS() {
         console.log(" ChessProviderFactory.PROVIDERS getter called");
@@ -356,20 +405,16 @@ class ChessProviderFactory {
         return providers;
     }
 
-    static getModelsByProvider(providerId) {
-        console.log(` ChessProviderFactory.getModelsByProvider called for: ${providerId}`);
-        const provider = this.PROVIDERS[providerId];
-        if (!provider) {
-            console.log(` Provider not found: ${providerId}`);
-            return [];
+    static async getModelsByProvider(providerId) {
+        if (providerId === 'ollama') {
+            return await this.fetchOllamaModels();
         }
-        
-        const models = Object.keys(provider.models).map(key => ({
+        const provider = this.PROVIDERS[providerId];
+        if (!provider) return [];
+        return Object.keys(provider.models).map(key => ({
             id: key,
             name: provider.models[key].displayName
         }));
-        console.log(` Models for ${providerId}:`, JSON.stringify(models, null, 2));
-        return models;
     }
 
     static getTempRange(providerId, modelId) {
@@ -385,6 +430,8 @@ class ChessProviderFactory {
         console.log(` API Key present: ${apiKey ? 'Yes' : 'No'}`);
         
         switch(providerId) {
+            case 'ollama':
+                return new OllamaProvider(modelId, temperature);
             case 'groq':
                 console.log(` Creating GroqProvider instance`);
                 return new GroqProvider(apiKey, modelId, temperature);
@@ -407,6 +454,7 @@ class ChessProviderFactory {
     }
 }
 
+
 class ChessGame {
    constructor() {
        this.game = new Chess();
@@ -418,8 +466,20 @@ class ChessGame {
        this.debugMode = false;
        this.selectedPiece = null;
        this.legalMoves = new Map();
+       this.initialized = false;
+       this.initAsync();
+   }
 
-       this.initialize();
+   async initAsync() {
+       this.initializeBoard();
+       this.initializeControls();
+       await this.populateProviderDropdownsAsync();
+       this.setupPlayerTypeChangeHandlers();
+       this.loadSettings();
+       this.loadSavedApiKeys();
+       ['1', '2'].forEach(playerNum => this.updateApiKeyButtons(playerNum));
+       $(window).resize(() => this.board.resize());
+       this.initialized = true;
        this.updatePlayerControls();
    }
 
@@ -580,137 +640,132 @@ class ChessGame {
        }
    }
 
-   populateProviderDropdowns() {
-       console.log(" ChessGame.populateProviderDropdowns called");
+   async populateProviderDropdownsAsync() {
        const providers = ChessProviderFactory.getProviders();
-       console.log(" Providers to populate:", JSON.stringify(providers, null, 2));
-       
        ['1', '2'].forEach(playerNum => {
-           console.log(` Populating provider dropdown for player ${playerNum}`);
            const select = document.getElementById(`provider${playerNum}`);
-           if (!select) {
-               console.error(` Provider select element not found for player ${playerNum}`);
-               return;
-           }
-           console.log(` Found provider select element for player ${playerNum}`);
-           
-           // Save current value if any
+           if (!select) return;
            const currentValue = select.value;
-           console.log(` Current provider value: "${currentValue}"`);
-           
-           // Create a new select element
            const newSelect = document.createElement('select');
            newSelect.id = `provider${playerNum}`;
-           console.log(` Created new select element with id: ${newSelect.id}`);
-           
-           // Populate the dropdown
            newSelect.innerHTML = '';
            newSelect.appendChild(new Option('Select Provider', ''));
-           console.log(` Added default 'Select Provider' option`);
-           
            providers.forEach(provider => {
-               console.log(` Adding provider option: ${provider.name} (${provider.id})`);
                newSelect.appendChild(new Option(provider.name, provider.id));
            });
-           
-           // Restore previous value if possible
-           if (currentValue) {
-               console.log(` Attempting to restore previous value: ${currentValue}`);
-               newSelect.value = currentValue;
-               console.log(` New select value after restore: "${newSelect.value}"`);
-           }
-           
-           // Add the change event listener
-           console.log(` Adding change event listener to provider dropdown`);
-           newSelect.addEventListener('change', (e) => {
+           if (currentValue) newSelect.value = currentValue;
+           newSelect.addEventListener('change', async (e) => {
                const providerId = e.target.value;
-               console.log(` Provider changed to: "${providerId}"`);
-               
                const modelGroup = document.getElementById(`modelGroup${playerNum}`);
                const apiKeyGroup = document.getElementById(`apiKeyGroup${playerNum}`);
-               
-               // Show/hide model group based on provider selection
                modelGroup.style.display = providerId ? 'block' : 'none';
-               console.log(` Model group display: ${modelGroup.style.display}`);
-               
-               // Show/hide API key group based on provider selection
                apiKeyGroup.style.display = providerId ? 'block' : 'none';
-               console.log(` API key group display: ${apiKeyGroup.style.display}`);
-               
-               // Update model dropdown for selected provider
+               // Mostrar el campo modelo y label aunque no haya modelos aún
+               document.getElementById(`modelLabel${playerNum}`).style.display = providerId ? '' : 'none';
+               document.getElementById(`model${playerNum}`).style.display = providerId ? '' : 'none';
+               document.getElementById(`model${playerNum}Error`).style.display = 'none';
                if (providerId) {
-                   console.log(` Updating model dropdown for provider: ${providerId}`);
-                   this.populateModelDropdown(playerNum, providerId);
+                   await this.populateModelDropdownAsync(playerNum, providerId);
                    this.loadApiKeyForProvider(playerNum, providerId);
+               } else {
+                   // Si no hay proveedor, ocultar modelo
+                   document.getElementById(`modelLabel${playerNum}`).style.display = 'none';
+                   document.getElementById(`model${playerNum}`).style.display = 'none';
+                   document.getElementById(`model${playerNum}Error`).style.display = 'none';
                }
-               
                this.saveSettings();
            });
-           
-           // Replace the old element with the new one
-           console.log(` Replacing old provider select with new one`);
            select.parentNode.replaceChild(newSelect, select);
-           console.log(` Provider dropdown population complete for player ${playerNum}`);
+           // Forzar recarga visual del modelo si ya hay proveedor seleccionado
+           if (newSelect.value) {
+               document.getElementById(`modelGroup${playerNum}`).style.display = 'block';
+               document.getElementById(`modelLabel${playerNum}`).style.display = '';
+               document.getElementById(`model${playerNum}`).style.display = '';
+               this.populateModelDropdownAsync(playerNum, newSelect.value);
+           }
        });
    }
 
-   populateModelDropdown(playerNum, providerId) {
-       console.log(`🔍 ChessGame.populateModelDropdown called for player ${playerNum}, provider ${providerId}`);
-       const models = ChessProviderFactory.getModelsByProvider(providerId);
-       console.log(`📋 Models to populate:`, JSON.stringify(models, null, 2));
-       
+   async populateModelDropdownAsync(playerNum, providerId) {
        const select = document.getElementById(`model${playerNum}`);
-       if (!select) {
-           console.error(`❌ Model select element not found for player ${playerNum}`);
+       const label = document.getElementById(`modelLabel${playerNum}`);
+       const errorSpan = document.getElementById(`model${playerNum}Error`);
+       if (!select || !label || !errorSpan) return;
+       select.style.display = 'none';
+       label.style.display = 'none';
+       errorSpan.style.display = 'none';
+       select.innerHTML = '';
+
+       // Ollama: escanear modelos realmente disponibles
+       if (providerId === 'ollama') {
+           label.style.display = '';
+           select.style.display = '';
+           select.innerHTML = '<option value="">Cargando modelos...</option>';
+           try {
+               const response = await axios.get('http://localhost:3000/ollama/api/tags');
+               let models = [];
+               let rawJson = null;
+               // Log para depuración
+               console.log('Ollama response:', response);
+               if (response && response.data) {
+                   if (typeof response.data === 'string') {
+                       try {
+                           rawJson = JSON.parse(response.data);
+                       } catch (e) {
+                           rawJson = null;
+                       }
+                   } else if (typeof response.data === 'object') {
+                       rawJson = response.data;
+                   }
+               }
+               if (rawJson && rawJson.models && Array.isArray(rawJson.models)) {
+                   models = rawJson.models;
+               }
+               // Si no hay modelos, mostrar select vacío pero visible
+               if (!models || models.length === 0) {
+                   select.innerHTML = '<option value="">No hay modelos Ollama instalados</option>';
+                   errorSpan.textContent = 'No hay modelos Ollama instalados.';
+                   errorSpan.style.display = '';
+                   select.style.display = '';
+                   label.style.display = '';
+                   return;
+               }
+               select.innerHTML = '<option value="">Selecciona modelo</option>';
+               models.forEach(model => {
+                   const opt = document.createElement('option');
+                   opt.value = model.name;
+                   opt.textContent = model.name;
+                   select.appendChild(opt);
+               });
+               errorSpan.style.display = 'none';
+               select.style.display = '';
+               label.style.display = '';
+           } catch (err) {
+               select.innerHTML = '<option value="">Error al cargar modelos Ollama</option>';
+               errorSpan.textContent = 'Error al cargar modelos Ollama.';
+               errorSpan.style.display = '';
+               select.style.display = '';
+               label.style.display = '';
+           }
            return;
        }
-       console.log(`✅ Found model select element for player ${playerNum}`);
-       
-       // Save current value if any
-       const currentValue = select.value;
-       console.log(`📊 Current model value: "${currentValue}"`);
-       
-       // Create a new select element
-       const newSelect = document.createElement('select');
-       newSelect.id = `model${playerNum}`;
-       console.log(`🔄 Created new select element with id: ${newSelect.id}`);
-       
-       // Populate the dropdown
-       newSelect.innerHTML = '';
-       newSelect.appendChild(new Option('Select Model', ''));
-       console.log(`🔄 Added default 'Select Model' option`);
-       
-       models.forEach(model => {
-           console.log(`🔄 Adding model option: ${model.name} (${model.id})`);
-           newSelect.appendChild(new Option(model.name, model.id));
-       });
-       
-       // Restore previous value if possible and it still exists in new options
-       if (currentValue) {
-           console.log(`🔄 Attempting to restore previous value: ${currentValue}`);
-           const exists = [...newSelect.options].some(option => option.value === currentValue);
-           console.log(`📊 Previous value exists in new options: ${exists}`);
-           if (exists) {
-               newSelect.value = currentValue;
-               console.log(`📊 New select value after restore: "${newSelect.value}"`);
-           }
+
+       // Otros proveedores: mostrar solo si tienen modelos definidos
+       const providerConfig = window.PROVIDER_CONFIG ? window.PROVIDER_CONFIG[providerId] : undefined;
+       if (providerConfig && providerConfig.models && Object.keys(providerConfig.models).length > 0) {
+           label.style.display = '';
+           select.style.display = '';
+           select.innerHTML = '<option value="">Selecciona modelo</option>';
+           Object.entries(providerConfig.models).forEach(([modelId, modelCfg]) => {
+               const opt = document.createElement('option');
+               opt.value = modelId;
+               opt.textContent = modelCfg.displayName || modelId;
+               select.appendChild(opt);
+           });
+       } else {
+           select.style.display = 'none';
+           label.style.display = 'none';
        }
-       
-       // Add change event listener
-       console.log(`🔄 Adding change event listener to model dropdown`);
-       newSelect.addEventListener('change', (e) => {
-           console.log(`🔄 Model changed to: "${e.target.value}"`);
-           if (e.target.value) {
-               console.log(`🔄 Updating temperature range for model: ${e.target.value}`);
-               this.updateTempRange(playerNum, providerId, e.target.value);
-           }
-           this.saveSettings();
-       });
-       
-       // Replace the old element with the new one
-       console.log(`🔄 Replacing old model select with new one`);
-       select.parentNode.replaceChild(newSelect, select);
-       console.log(`✅ Model dropdown population complete for player ${playerNum}`);
    }
 
    loadApiKeyForProvider(playerNum, providerId) {
@@ -725,7 +780,7 @@ class ChessGame {
         document.getElementById('startBtn').addEventListener('click', () => this.startNewGame());
         document.getElementById('stepBtn').addEventListener('click', () => this.makeMove());
         document.getElementById('copyPgn').addEventListener('click', () => this.copyPgnToClipboard());
-        
+
         // Button event listeners
         const setupButtonListener = (id, callback) => {
             const button = document.getElementById(id);
@@ -733,35 +788,20 @@ class ChessGame {
                 button.addEventListener('click', callback);
             }
         };
-        
+
         setupButtonListener('startBtn', () => this.startNewGame());
         setupButtonListener('stepBtn', () => this.makeMove());
         setupButtonListener('copyPgn', () => this.copyPgnToClipboard());
-        
-        // Checkbox event listeners
-        const setupCheckboxListener = (id, callback) => {
-            const checkbox = document.getElementById(id);
-            if (checkbox) {
-                checkbox.addEventListener('change', (e) => callback(e.target.checked));
-            }
-        };
-        
-        setupCheckboxListener('autoPlay', (checked) => this.toggleAutoPlay(checked));
-        setupCheckboxListener('debugMode', (checked) => {
-            this.debugMode = checked;
-            this.logDebug('Debug mode ' + (this.debugMode ? 'enabled' : 'disabled'));
+
+        // Save model selection button
+        setupButtonListener('saveSelectionBtn', () => {
+            this.saveSettings();
+            // Show feedback to user
+            const btn = document.getElementById('saveSelectionBtn');
+            btn.textContent = '¡Selección guardada!';
+            setTimeout(() => { btn.textContent = 'Guardar Selección de Modelos'; }, 1500);
         });
-        
-        // Temperature sliders
-        ['temp1', 'temp2'].forEach(id => {
-            const slider = document.getElementById(id);
-            if (slider) {
-                slider.addEventListener('input', (e) => {
-                    document.getElementById(id + 'Value').textContent = e.target.value;
-                });
-            }
-        });
-        
+
         // API key handling
         ['1', '2'].forEach(playerNum => {
             const apiKeyInput = document.getElementById(`apiKey${playerNum}`);
@@ -770,7 +810,6 @@ class ChessGame {
                     this.updateApiKeyButtons(playerNum);
                 });
             }
-            
             setupButtonListener(`saveApiKey${playerNum}`, () => this.saveApiKey(playerNum));
             setupButtonListener(`clearApiKey${playerNum}`, () => this.clearApiKey(playerNum));
         });
@@ -899,7 +938,8 @@ class ChessGame {
            const apiKey = document.getElementById(`apiKey${player}`).value;
            const temperature = document.getElementById(`temp${player}`).value;
 
-           if (!apiKey) {
+           // Only require API key for providers that need it
+           if (providerId !== 'ollama' && !apiKey) {
                throw new Error(`API key required for ${this.currentPlayer} player`);
            }
 

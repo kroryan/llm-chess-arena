@@ -114,6 +114,11 @@ const PROVIDER_CONFIG = {
                 tempRange: { min: 0.1, max: 1.0 }
             }
         }
+    },
+    'ollama': {
+        displayName: 'Ollama (Local)',
+        models: {}, // Se poblará dinámicamente desde el servidor Ollama
+        local: true
     }
 };
 

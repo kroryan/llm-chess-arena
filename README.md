@@ -5,88 +5,90 @@
 
 A web-based chess platform where Large Language Models (LLMs) compete against each other or human players using LLM APIs. Watch AI models reason about and play chess in real-time with detailed move analysis.
 
-### Quick Start
-1. Visit [llm-chess-arena.github.io/llm-chess-arena](https://llm-chess-arena.github.io/llm-chess-arena/)
-2. Enter your API key
-3. Configure your game settings
-4. Start playing!
+---
 
-![Screenshot of LLM Chess Arena](https://i.ibb.co/Y2vvB8T/image.png)
+## 🚀 Quick Start
 
-## Overview
+1. **Install dependencies**
+   ```bash
+   npm install
+   ```
+2. **Start the proxy and web server**
+   ```bash
+   node server.js
+   ```
+   Open [http://localhost:3000/index.html](http://localhost:3000/index.html) in your browser.
+3. **Configure players**
+   - Select player type (human or AI)
+   - Choose provider and model for each player
+   - If the provider requires an API key, enter it and click "Save API Key"
+   - For Ollama, no API key is needed
+   - Click "Save Model Selection" to persist your configuration
+4. **Play!**
+   - Click "Start New Game" to begin
+   - "Make Move" executes the next AI move
+   - Enable "Auto Play" for automatic matches
 
-LLM Chess Arena enables AI models to engage in chess matches while providing detailed reasoning for their moves. The platform runs entirely client-side and supports various LLM providers including Groq, Xai, Gemini, and OpenAI.
+   ![Screenshot of LLM Chess Arena](https://i.ibb.co/Y2vvB8T/image.png)
 
-## Features
+---
 
-- **Interactive Chess Interface**
-  - OpenRouter support
-  - Real-time board visualization
-  - Move validation and legal move highlighting
-  - PGN export for game analysis
+## 🧩 Current Features & Improvements
 
-- **AI Capabilities**
-  - LLM vs LLM matches
-  - Human vs LLM gameplay
-  - Detailed move analysis and reasoning
-  - Support for multiple AI providers
+- **Express Proxy (`server.js`)**: The frontend never talks directly to Ollama, avoiding CORS issues. All local model requests go through `http://localhost:3000/ollama/...`.
+- **Dynamic model selection**: Ollama models are scanned in real time and only appear in the dropdown if installed.
+- **"Save Model Selection" button**: Persists your current configuration and shows visual confirmation.
+- **No API key required for Ollama**: The field is hidden and does not block the game if you use local models.
+- **Centralized configuration in `models-config.js`**: Easily add, remove, or modify models and providers.
+- **Robust UI**: Dropdowns and controls update dynamically based on provider/model selection.
+- **Multi-provider support**: Groq, OpenAI, Gemini, xAI Grok, OpenRouter, and Ollama (local).
 
-- **Configuration Options**
-  - LocalStorage for API keys. 
-  - Adjustable model parameters
-  - Auto-play functionality
-  - Debug mode for development
-  - Customizable game settings
+---
 
-## Getting Started
+## 🛠️ Key Files
 
-### Prerequisites
-- An LLM API key. (Get one for free at [console.groq.com/keys](https://console.groq.com/keys))
+- `index.html`: Main interface and game controls.
+- `chess-game.js`: Game logic, model integration, UI and API key management.
+- `models-config.js`: Provider and model configuration.
+- `server.js`: Express server + proxy for Ollama.
 
+---
 
+## 📝 Example Model Configuration
 
-### Local Development
-Simply open `index.html` in your browser or use any local server of your choice.
+Edit `models-config.js` to customize available models:
 
-### Customizing Model Selection
-
-The LLM Chess Arena now supports easy customization of available AI models through a dedicated configuration file. To add or modify models:
-
-1. Open `models-config.js` in any text editor
-2. Add new models or modify existing ones following the format:
-
-```javascript
-'provider-id': {
-    displayName: 'Provider Display Name',
-    models: {
-        'model-id': {
-            displayName: 'Model Display Name',
-            tempRange: { min: 0.1, max: 1.0 }
-        }
-    }
-}
-```
-
-3. Save the file and refresh your browser
-
-The hierarchical provider-model structure makes it easy to organize models by their provider and add new ones as they become available.
-
-#### Example: Adding a New OpenRouter Model
-
-```javascript
-// In models-config.js
+```js
 'openrouter': {
     displayName: 'OpenRouter',
     models: {
-        // Existing models...
-        
-        // Add your new model:
-        'cohere/command-r-plus': {
-            displayName: 'Cohere Command R+',
+        'anthropic/claude-3-opus:beta': {
+            displayName: 'Claude 3 Opus',
             tempRange: { min: 0.1, max: 1.0 }
-        }
+        },
+        // ...other models
     }
 }
 ```
 
-After saving these changes, the new model will appear in the dropdown when OpenRouter is selected as the provider.
+For Ollama, models are detected automatically based on those installed on your system.
+
+---
+
+## 🧑‍💻 Development & Testing
+
+- You can open the project directly in your browser using the Express proxy.
+- The system saves configuration and API keys in LocalStorage.
+- The "Save Model Selection" button allows you to persist your setup between sessions.
+
+---
+
+## 🏁 Final Notes
+
+- If you have CORS issues, always use the proxy (`server.js`).
+- If Ollama models do not appear, make sure Ollama is running and has models installed.
+- For any provider, ensure you have the correct API key if required.
+
+---
+
+Enjoy pitting LLMs against each other on the chessboard! If you have questions or want to improve the project, open an issue or PR.
