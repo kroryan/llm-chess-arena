@@ -6,46 +6,36 @@ if (typeof window !== 'undefined') {
     axios = require('axios');
 }
 
-const SYSTEM_PROMPT = `You are playing a game of chess. You must analyze the position and choose a valid move from the legal moves available.
+const SYSTEM_PROMPT = `You are a Chess Grandmaster playing a serious game. Your ONLY task is to select ONE valid move from the provided list of legal moves, using Standard Algebraic Notation (SAN).
 
 CRITICAL REQUIREMENTS:
-1. You MUST use Standard Algebraic Notation (SAN)
-2. You MUST choose from the provided list of legal moves
-3. Your move MUST be exactly as shown in the legal moves list
-4. DO NOT modify or reformat the move notation
+1. You MUST select EXACTLY ONE move from the provided legal moves list. DO NOT invent, modify, or ignore moves.
+2. Your move MUST match EXACTLY one of the legal moves shown (case, format, and spelling).
+3. DO NOT use coordinates (e2e4), only SAN (e.g., Nf3, exd5, O-O).
+4. DO NOT add any extra text, comments, or explanations outside the JSON.
+5. DO NOT wrap the JSON in code blocks or markdown.
+6. DO NOT add any text before or after the JSON.
+7. DO NOT return more than one move.
+8. If you cannot select a move from the list, return an error in the reasoning field and leave the move field empty.
+9. You must analyze all available pieces and moves, considering tactical and strategic factors, and always play as a Chess Grandmaster would.
+10. Consider piece development, control of the center, king safety, threats, captures, and all positional and tactical elements before choosing your move.
+11. If castling is available, consider its strategic value. If captures are available, evaluate their consequences. If checks or checkmates are possible, prioritize them.
+12. Your reasoning must explain why the chosen move is the best among all legal options, referencing specific pieces, squares, and plans.
+
+RESPONSE FORMAT:
+{
+  "move": "<your chosen move in EXACT SAN format>",
+  "reasoning": "<your analysis and explanation>"
+}
 
 Example valid responses:
-- For pawn moves: "e4", "d5", "exd5"
-- For piece moves: "Nf3", "Bc4", "Qd4"
-- For castling: "O-O" (kingside), "O-O-O" (queenside)
-- For captures: "Bxe4", "Nxc6", "exd5"
-- For checks: "Qd7+", "Nf7+"
-- For checkmate: "Qh7#"
+- {"move": "e4", "reasoning": "Advances the pawn to control the center and opens lines for the bishop and queen."}
+- {"move": "Nf3", "reasoning": "Develops the knight, controls key central squares, and prepares for kingside castling."}
+- {"move": "O-O", "reasoning": "Castles kingside to safeguard the king and connect the rooks."}
+- {"move": "Bxe4", "reasoning": "Captures the pawn, gaining material and central control."}
+- {"move": "Qh7#", "reasoning": "Delivers checkmate by attacking the king on h7."}
 
-Common mistakes to AVOID:
-- DO NOT use coordinates format (e2e4)
-- DO NOT add unnecessary characters (P-e4, PxP)
-- DO NOT modify the notation (E4, N-f3)
-- DO NOT add unnecessary details (pawn to e4)
-
-JSON:
-- ONLY WRITE JSON.
-- DO NOT WRITE ANYTHING BEFORE THE JSON OR AFTER THE JSON.
-- YOU ONLY OUTPUT VALID JSON CODE. 
-
-RESPONSE FORMAT REQUIREMENTS:
-- You MUST return ONLY a valid JSON object
-- DO NOT include any text before or after the JSON
-- DO NOT wrap the JSON in code blocks or markdown
-- DO NOT add any explanatory text
-- The response should start with { and end with }
-
-Previous game moves and current position will be provided.
-Respond with a JSON object containing your move and reasoning:
-{
-   "move": "<your chosen move in EXACT SAN format>",
-   "reasoning": "<your analysis and explanation>"
-}`;
+Previous game moves and current position will be provided. Respond ONLY with a valid JSON object as described above.`;
 
 class ChessModelProvider {
    async makeMove({ fen, history, legalMoves }) {
@@ -623,7 +613,7 @@ class ChessGame {
        });
 
        this.currentPlayer = this.currentPlayer === 'white' ? 'black' : 'white';
-       if (this.currentPlayer === 'white') this.moveCount++;
+       this.moveCount++;
        this.updateStatus();
 
        if (this.game.game_over()) {
@@ -944,20 +934,50 @@ class ChessGame {
            }
 
            const provider = ChessProviderFactory.createProvider(providerId, modelId, apiKey, temperature);
-           const moveData = await provider.makeMove({
-               fen: this.game.fen(),
-               history: this.game.history().join(' '),
-               legalMoves: this.game.moves()
-           });
+           let moveData;
+           let modelError = null;
+           let maxRetries = parseInt(document.getElementById('maxRetries')?.value || '3');
+           for (let attempt = 0; attempt < maxRetries; attempt++) {
+               try {
+                   moveData = await provider.makeMove({
+                       fen: this.game.fen(),
+                       history: this.game.history(), // Pasa el historial como array
+                       legalMoves: this.game.moves()
+                   });
+                   // Validar el movimiento aquí también
+                   if (moveData && moveData.move && this.game.moves().includes(moveData.move)) {
+                       break;
+                   } else {
+                       throw new Error(`Invalid move from model: ${moveData?.move}`);
+                   }
+               } catch (err) {
+                   modelError = err;
+                   moveData = null;
+               }
+           }
 
-           const move = this.game.move(moveData.move);
-           if (!move) throw new Error('Move validation failed');
+           let move = moveData && moveData.move ? this.game.move(moveData.move) : null;
+           let usedMove = moveData && moveData.move ? moveData.move : null;
+           let reasoning = moveData && moveData.reasoning ? moveData.reasoning : '';
+
+           if (!move) {
+               // Si el modelo falla tras varios intentos, elige uno aleatorio
+               const legalMoves = this.game.moves();
+               const randomMove = legalMoves[Math.floor(Math.random() * legalMoves.length)];
+               move = this.game.move(randomMove);
+               usedMove = randomMove;
+               reasoning = 'El modelo falló tras varios intentos, se eligió un movimiento válido aleatorio.';
+               if (modelError) this.logError(modelError);
+               else this.logError(new Error('El modelo devolvió un movimiento inválido. Se forzó un movimiento aleatorio.'));
+           }
 
            this.board.position(this.game.fen());
-           this.logMove(moveData);
-
+           this.logMove({ move: usedMove, reasoning });
+           if (this.debugMode) {
+               this.logDebug(`[LLM Output] Move: ${moveData && moveData.move ? moveData.move : 'N/A'} | Reasoning: ${moveData && moveData.reasoning ? moveData.reasoning : 'N/A'} | Error: ${modelError ? modelError.message : 'N/A'}`);
+           }
            this.currentPlayer = this.currentPlayer === 'white' ? 'black' : 'white';
-           if (this.currentPlayer === 'white') this.moveCount++;
+           this.moveCount++;
            this.updateStatus();
 
            if (this.game.game_over()) {
@@ -968,6 +988,11 @@ class ChessGame {
            const nextPlayerType = this.currentPlayer === 'white' ? 
                document.getElementById('playerType1').value :
                document.getElementById('playerType2').value;
+
+           // Si el siguiente jugador es AI y no está en auto-play, llama a makeMove automáticamente
+           if (nextPlayerType === 'ai' && !document.getElementById('autoPlay').checked) {
+               setTimeout(() => this.makeMove(), 500);
+           }
 
            if (nextPlayerType === 'ai' && document.getElementById('autoPlay').checked) {
                return true;
